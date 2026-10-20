@@ -43,7 +43,7 @@ BEGIN
 
     INSERT INTO dbo.LoaiVe (
         SuKienID,
-        TenLoaiVe,
+        TenLoai,
         GiaVe,
         SoLuongToiDa,
         SoLuongDaBan,
@@ -122,7 +122,7 @@ BEGIN
 
     UPDATE dbo.LoaiVe
     SET
-        TenLoaiVe = @TenLoaiVe,
+        TenLoai = @TenLoaiVe,
         GiaVe = @GiaVe,
         SoLuongToiDa = @SoLuongToiDa,
         SoLuongToiDaMoiDon = @SoLuongToiDaMoiDon,
@@ -217,21 +217,29 @@ BEGIN
         IF @TongTienThanhToan IS NULL
             THROW 50427, N'Khong tinh duoc tong tien thanh toan.', 1;
 
+        DECLARE @MaDonHang NVARCHAR(50);
+        SET @MaDonHang =
+            N'DH' + REPLACE(CONVERT(NVARCHAR(36), NEWID()), N'-', N'');
+
         INSERT INTO dbo.DonVe (
             TaiKhoanID,
+            MaDonHang,
             TongTienGoc,
             TongTienGiam,
             TongTienThanhToan,
             TrangThaiThanhToan,
-            TrangThaiDon
+            TrangThaiDon,
+            ThoiGianHetHanThanhToan
         )
         VALUES (
             @TaiKhoanID,
+            @MaDonHang,
             @TongTienGoc,
             @TongTienGiam,
             @TongTienThanhToan,
+            N'ChuaThanhToan',
             N'ChoThanhToan',
-            N'ChoThanhToan'
+            DATEADD(MINUTE, 15, SYSDATETIME())
         );
 
         DECLARE @DonVeID INT =
@@ -276,6 +284,7 @@ CREATE OR ALTER PROCEDURE dbo.sp_GhiNhanThanhToan
     @DonVeID INT,
     @SoTien DECIMAL(18,2),
     @MaGiaoDich NVARCHAR(200),
+    @PhuongThucThanhToan NVARCHAR(50),
     @TrangThai NVARCHAR(30)
 AS
 BEGIN
@@ -285,8 +294,16 @@ BEGIN
     IF @SoTien <= 0
         THROW 50430, N'So tien thanh toan phai lon hon 0.', 1;
 
-    IF @TrangThai NOT IN (N'ThanhCong', N'ThatBai', N'ChoXuLy')
+    IF @TrangThai NOT IN (N'ThanhCong', N'ThatBai', N'DangXuLy')
         THROW 50431, N'Trang thai thanh toan khong hop le.', 1;
+
+    IF @PhuongThucThanhToan NOT IN (
+        N'VNPAY', N'MoMo', N'ZaloPay', N'ChuyenKhoan'
+    )
+        THROW 50435, N'Phuong thuc thanh toan khong hop le.', 1;
+
+    IF NULLIF(LTRIM(RTRIM(@MaGiaoDich)), N'') IS NULL
+        THROW 50436, N'Ma giao dich khong duoc de trong.', 1;
 
     BEGIN TRY
         BEGIN TRANSACTION;
@@ -312,16 +329,18 @@ BEGIN
 
         INSERT INTO dbo.ThanhToan (
             DonVeID,
+            PhuongThucThanhToan,
+            MaGiaoDichCongThanhToan,
             LoaiGiaoDich,
             SoTien,
-            MaGiaoDich,
             TrangThai
         )
         VALUES (
             @DonVeID,
+            @PhuongThucThanhToan,
+            @MaGiaoDich,
             N'ThanhToan',
             @SoTien,
-            @MaGiaoDich,
             @TrangThai
         );
 
@@ -416,11 +435,14 @@ BEGIN
     SET NOCOUNT ON;
     SET XACT_ABORT ON;
 
-    IF @TrangThai NOT IN (N'ThanhCong', N'ThatBai', N'ChoXuLy')
+    IF @TrangThai NOT IN (N'ThanhCong', N'ThatBai', N'DangXuLy')
         THROW 50450, N'Trang thai hoan tien khong hop le.', 1;
 
     IF @SoTienHoan <= 0
         THROW 50451, N'So tien hoan phai lon hon 0.', 1;
+
+    IF NULLIF(LTRIM(RTRIM(@MaGiaoDich)), N'') IS NULL
+        THROW 50454, N'Ma giao dich khong duoc de trong.', 1;
 
     BEGIN TRY
         BEGIN TRANSACTION;
@@ -432,6 +454,18 @@ BEGIN
         )
             THROW 50452, N'Don ve khong ton tai.', 1;
 
+        DECLARE @PhuongThucThanhToan NVARCHAR(50);
+
+        SELECT TOP (1) @PhuongThucThanhToan = PhuongThucThanhToan
+        FROM dbo.ThanhToan WITH (UPDLOCK, HOLDLOCK)
+        WHERE DonVeID = @DonVeID
+          AND LoaiGiaoDich = N'ThanhToan'
+          AND TrangThai = N'ThanhCong'
+        ORDER BY ThanhToanID DESC;
+
+        IF @PhuongThucThanhToan IS NULL
+            THROW 50455, N'Don ve chua co giao dich thanh toan thanh cong.', 1;
+
         IF @TrangThai = N'ThanhCong'
            AND dbo.fn_KiemTraSoTienHoanHopLe(
                @DonVeID, @SoTienHoan
@@ -440,26 +474,37 @@ BEGIN
 
         INSERT INTO dbo.ThanhToan (
             DonVeID,
+            PhuongThucThanhToan,
+            MaGiaoDichCongThanhToan,
             LoaiGiaoDich,
             SoTien,
-            MaGiaoDich,
             TrangThai
         )
         VALUES (
             @DonVeID,
+            @PhuongThucThanhToan,
+            @MaGiaoDich,
             N'HoanTien',
             @SoTienHoan,
-            @MaGiaoDich,
             @TrangThai
         );
 
         IF @TrangThai = N'ThanhCong'
-           AND dbo.fn_TinhTienDaHoan(@DonVeID) >=
-               dbo.fn_TinhTienDaThanhToan(@DonVeID)
         BEGIN
-            UPDATE dbo.DonVe
-            SET TrangThaiDon = N'DaHuy'
-            WHERE DonVeID = @DonVeID;
+            IF dbo.fn_TinhTienDaHoan(@DonVeID) >=
+               dbo.fn_TinhTienDaThanhToan(@DonVeID)
+            BEGIN
+                UPDATE dbo.DonVe
+                SET TrangThaiThanhToan = N'DaHoanTien',
+                    TrangThaiDon = N'DaHoanTien'
+                WHERE DonVeID = @DonVeID;
+            END
+            ELSE
+            BEGIN
+                UPDATE dbo.DonVe
+                SET TrangThaiThanhToan = N'HoanTienMotPhan'
+                WHERE DonVeID = @DonVeID;
+            END;
         END;
 
         COMMIT TRANSACTION;
@@ -555,14 +600,14 @@ GO
 /* 9. Ghi lich su xuat ve */
 CREATE OR ALTER PROCEDURE dbo.sp_GhiLichSuXuatVe
     @VeID INT,
-    @HinhThucXuat NVARCHAR(30),
+    @HinhThucXuat NVARCHAR(50),
     @NguoiThucHienID INT
 AS
 BEGIN
     SET NOCOUNT ON;
 
     IF @HinhThucXuat NOT IN (
-        N'PDF', N'Email', N'InTaiQuay', N'Kiosk'
+        N'ExportPDF', N'GuiEmail', N'InVeGiayTaiQuay', N'InQuaKiosk'
     )
         THROW 50470, N'Hinh thuc xuat ve khong hop le.', 1;
 
@@ -578,8 +623,8 @@ BEGIN
     INSERT INTO dbo.XuatVe (
         VeID,
         HinhThucXuat,
-        NguoiThucHienID,
-        NgayXuat
+        NguoiXuatID,
+        ThoiGianXuat
     )
     VALUES (
         @VeID,
