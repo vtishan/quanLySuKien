@@ -1,0 +1,1 @@
+// khởi động chương trình ở đây
