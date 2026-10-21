@@ -1,4 +1,4 @@
-global using db = Db;
+global using Database = Db;
 
 using System.Data;
 using Microsoft.Data.SqlClient;
@@ -9,7 +9,7 @@ public static class Db
     const string BIEN_KET_NOI_DU_PHONG = "ConnectionStrings__QuanLySuKien";
     const int THOI_GIAN_CHO = 30;
 
-    static SqlConnection ketNoi;
+    static SqlConnection? ketNoi;
 
     static string chuoiKetNoi() =>
         Environment.GetEnvironmentVariable(BIEN_KET_NOI)
@@ -18,13 +18,18 @@ public static class Db
 
     public static bool connect()
     {
-        ketNoi ??= new SqlConnection(chuoiKetNoi());
-        if (ketNoi.State != ConnectionState.Open) ketNoi.Open();
+        if (ketNoi is null)
+            ketNoi = new SqlConnection(chuoiKetNoi());
+
+        if (ketNoi.State != ConnectionState.Open)
+            ketNoi.Open();
+
         return true;
     }
 
     public static bool connect(string chuoi)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(chuoi);
         disconnect();
         ketNoi = new SqlConnection(chuoi);
         ketNoi.Open();
@@ -96,35 +101,46 @@ public static class Db
             ["thanhToan.hoanTien"] = ("sp_GhiNhanHoanTien", new[] { "@DonVeID", "@SoTienHoan", "@MaGiaoDich", "@TrangThai" })
         };
 
-    public static DataTable taiKhoan(string nghiepVu, params object[] thamSo) => goi("taiKhoan", nghiepVu, thamSo);
-    public static DataTable suKien(string nghiepVu, params object[] thamSo) => goi("suKien", nghiepVu, thamSo);
-    public static DataTable diaDiem(string nghiepVu, params object[] thamSo) => goi("diaDiem", nghiepVu, thamSo);
-    public static DataTable donVe(string nghiepVu, params object[] thamSo) => goi("donVe", nghiepVu, thamSo);
-    public static DataTable ve(string nghiepVu, params object[] thamSo) => goi("ve", nghiepVu, thamSo);
-    public static DataTable thanhToan(string nghiepVu, params object[] thamSo) => goi("thanhToan", nghiepVu, thamSo);
+    public static DataTable taiKhoan(string nghiepVu, params object?[] thamSo) => goi("taiKhoan", nghiepVu, thamSo);
+    public static DataTable suKien(string nghiepVu, params object?[] thamSo) => goi("suKien", nghiepVu, thamSo);
+    public static DataTable diaDiem(string nghiepVu, params object?[] thamSo) => goi("diaDiem", nghiepVu, thamSo);
+    public static DataTable donVe(string nghiepVu, params object?[] thamSo) => goi("donVe", nghiepVu, thamSo);
+    public static DataTable ve(string nghiepVu, params object?[] thamSo) => goi("ve", nghiepVu, thamSo);
+    public static DataTable thanhToan(string nghiepVu, params object?[] thamSo) => goi("thanhToan", nghiepVu, thamSo);
     public static DataTable thucThi(string thuTuc, params SqlParameter[] thamSo) => chay(thuTuc, thamSo);
 
-    static DataTable goi(string nhom, string nghiepVu, object[] thamSo)
+    static DataTable goi(string nhom, string nghiepVu, object?[] thamSo)
     {
         if (!NGHIEP_VU.TryGetValue(nhom + "." + nghiepVu, out var m))
             throw new ArgumentException($"Khong co nghiep vu {nhom}.{nghiepVu}.");
+
         return chay(m.sp, bienThamSo(m.ten, thamSo));
     }
 
-    static SqlParameter[] bienThamSo(string[] ten, object[] giaTri)
+    static SqlParameter[] bienThamSo(string[] ten, object?[] giaTri)
     {
+        if (giaTri.Length > ten.Length)
+            throw new ArgumentException("Thua tham so.");
+
         var thamSo = new SqlParameter[giaTri.Length];
+
         for (var i = 0; i < giaTri.Length; i++)
+        {
             thamSo[i] = giaTri[i] as SqlParameter
-                ?? new SqlParameter(i < ten.Length ? ten[i] : throw new ArgumentException("Thua tham so."), giaTri[i] ?? DBNull.Value);
+                ?? new SqlParameter(ten[i], giaTri[i] ?? DBNull.Value);
+        }
+
         return thamSo;
     }
 
     static DataTable chay(string thuTuc, SqlParameter[] thamSo)
     {
         var dungChung = ketNoi is { State: ConnectionState.Open };
-        var cn = dungChung ? ketNoi : new SqlConnection(chuoiKetNoi());
-        if (!dungChung) cn.Open();
+        SqlConnection cn = dungChung ? ketNoi! : new SqlConnection(chuoiKetNoi());
+
+        if (!dungChung)
+            cn.Open();
+
         try
         {
             using var lenh = new SqlCommand(thuTuc, cn)
@@ -132,7 +148,10 @@ public static class Db
                 CommandType = CommandType.StoredProcedure,
                 CommandTimeout = THOI_GIAN_CHO
             };
-            if (thamSo.Length > 0) lenh.Parameters.AddRange(thamSo);
+
+            if (thamSo.Length > 0)
+                lenh.Parameters.AddRange(thamSo);
+
             using var bo = new SqlDataAdapter(lenh);
             var bang = new DataTable();
             bo.Fill(bang);
@@ -140,7 +159,8 @@ public static class Db
         }
         finally
         {
-            if (!dungChung) cn.Dispose();
+            if (!dungChung)
+                cn.Dispose();
         }
     }
 
@@ -184,21 +204,23 @@ public static class Db
         using var cn = new SqlConnection(chuoiKetNoi());
         cn.Open();
         using var giaoDich = cn.BeginTransaction(IsolationLevel.Serializable);
+
         try
         {
             using (var lenh = new SqlCommand(SINH_VE, cn, giaoDich))
             {
                 lenh.CommandTimeout = THOI_GIAN_CHO;
-                lenh.Parameters.AddWithValue("@DonVeID", donVeID);
+                lenh.Parameters.Add("@DonVeID", SqlDbType.Int).Value = donVeID;
                 lenh.ExecuteNonQuery();
             }
 
             var bang = new DataTable();
+
             using (var lenh = new SqlCommand(
                 @"SELECT V.VeID, V.DonVeID, V.LoaiVeID, V.MaVe, V.MaQR, V.TrangThai, V.GiaThucTe
                   FROM dbo.Ve V WHERE V.DonVeID = @DonVeID ORDER BY V.VeID;", cn, giaoDich))
             {
-                lenh.Parameters.AddWithValue("@DonVeID", donVeID);
+                lenh.Parameters.Add("@DonVeID", SqlDbType.Int).Value = donVeID;
                 using var bo = new SqlDataAdapter(lenh);
                 bo.Fill(bang);
             }
@@ -214,7 +236,11 @@ public static class Db
     }
 
     public static DataRow? dongDau(DataTable bang) => bang.Rows.Count > 0 ? bang.Rows[0] : null;
+
     public static int soDong(DataTable bang) => bang.Rows.Count;
+
     public static int soNguyen(DataTable bang, string cot) =>
-        bang.Rows.Count == 0 || bang.Rows[0][cot] is DBNull ? 0 : Convert.ToInt32(bang.Rows[0][cot]);
+        bang.Rows.Count == 0 || bang.Rows[0][cot] is DBNull
+            ? 0
+            : Convert.ToInt32(bang.Rows[0][cot]);
 }

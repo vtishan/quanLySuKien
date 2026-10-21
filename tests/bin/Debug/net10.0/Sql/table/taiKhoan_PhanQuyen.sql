@@ -1,0 +1,27 @@
+CREATE TABLE VaiTro (
+    VaiTroID INT IDENTITY(1,1) PRIMARY KEY,
+    TenVaiTro NVARCHAR(50) NOT NULL UNIQUE
+);
+
+INSERT INTO VaiTro (TenVaiTro)
+VALUES
+    (N'NguoiDung'),
+    (N'BanToChuc'),
+    (N'QuanLySuKien'),
+    (N'QuanTriVien');
+
+
+CREATE TABLE TaiKhoan (
+    TaiKhoanID INT IDENTITY(1,1) PRIMARY KEY,
+    VaiTroID INT NOT NULL,
+    HoTen NVARCHAR(100) NOT NULL,
+    Email NVARCHAR(255) NOT NULL UNIQUE,
+    MatKhauHash NVARCHAR(255) NOT NULL,
+    SoDienThoai NVARCHAR(20) NULL,
+    TrangThai BIT NOT NULL DEFAULT 1,
+    NgayTao DATETIME2 NOT NULL DEFAULT SYSDATETIME(),
+
+    CONSTRAINT FK_TaiKhoan_VaiTro
+        FOREIGN KEY (VaiTroID)
+        REFERENCES VaiTro(VaiTroID)
+);
